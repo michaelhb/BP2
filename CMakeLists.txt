@@ -11,8 +11,6 @@ set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} ${PROJECT_SOURCE_DIR}/cmake)
 find_package(CASADI REQUIRED)
 find_package(gnuplot-iostream REQUIRED)
 
-message(STATUS ${CASADI_INCLUDE_DIR})
-
 # Should only contain library code
 add_subdirectory(src)
 
