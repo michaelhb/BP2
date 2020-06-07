@@ -1,26 +1,17 @@
-SET(LIBRARY GNUPLOT_IOS)
-SET(LIBRARYNAME Gnuplot-iostream)
-FIND_PACKAGE(Boost COMPONENTS iostreams REQUIRED)
-FIND_PATH(${LIBRARY}_INCLUDE_DIR gnuplot-iostream/gnuplot-iostream.h # insert the header file name here
+# Find the gnuplot-ios header
+find_path(GNUPLOT_IOS_INCLUDE_DIR gnuplot-iostream.h # insert the header file name here
     PATHS 
     /opt/local/include
     $ENV{HOME}/build/include
-    )
+    ) 
 
-set(${LIBRARY}_LIBRARIES ${Boost_LIBRARIES})
-set(${LIBRARY}_INCLUDE_DIR ${LIBRARY}_INCLUDE_DIR ${Boost_INCLUDE_DIR})
+if(GNUPLOT_IOS_INCLUDE_DIR)
+    # Create a target to represent the header
+    add_library(gnuplot_ios INTERFACE IMPORTED)
 
-if (${LIBRARY}_INCLUDE_DIR AND ${LIBRARY}_LIBRARIES)# AND ${LIBRARY}_LIBRARIES)
-    set (${LIBRARY}_FOUND true)
-endif(${LIBRARY}_INCLUDE_DIR AND ${LIBRARY}_LIBRARIES)# AND ${LIBRARY}_LIBRARIES)
-
-
-if (${LIBRARY}_FOUND)
-    if (NOT ${LIBRARY}_FIND_QUIETLY)
-        message(STATUS "Found ${LIBRARYNAME}: ${${LIBRARY}_LIBRARIES}")
-    endif(NOT ${LIBRARY}_FIND_QUIETLY)
-else (${LIBRARY}_FOUND)
-   if (${LIBRARY}_FIND_REQUIRED)
-      message(FATAL_ERROR "Could not find ${LIBRARYNAME}")
-    endif(${LIBRARY}_FIND_REQUIRED)
-endif(${LIBRARY}_FOUND) 
+    # Add the header to the target
+    set_target_properties(gnuplot_ios PROPERTIES INTERFACE_INCLUDE_DIRECTORIES ${GNUPLOT_IOS_INCLUDE_DIR})
+    message("GNUPLOT_IOS_INCLUDE_DIR: ${GNUPLOT_IOS_INCLUDE_DIR}")
+else()
+    message(FATAL_ERROR "Could not find gnuplot_ios")
+endif()

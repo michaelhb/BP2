@@ -32,9 +32,9 @@ struct NLP {
 class CasadiBounceSolver {
 
 public:
-    CasadiBounceSolver(casadi::Function potential, 
+    CasadiBounceSolver(casadi::Function potential_, int n_phi_,
         casadi::SXVector v_params_ = {}, int n_dims_ = 3, int N_ = 100) :
-        n_dims(n_dims_), N(N_), v_params(v_params_) {
+        n_phi(n_phi_), n_dims(n_dims_), N(N_), v_params(v_params_), potential(potential_) {
         using namespace casadi;
 
         // TODO most of what's below probably shouldn't live in the 
@@ -99,13 +99,198 @@ public:
         nlp = get_nlp(potential);
     }
 
+    BouncePath solve(const std::vector<double>& true_vacuum, const std::vector<double>& false_vacuum,
+        std::map<std::string, double> v_pars) const {
+
+        using namespace casadi;
+        using namespace std::chrono;
+
+        // Vector of (canonically ordered) parameter values
+        std::vector<double> v_param_vals;
+        for (auto & v_param_sx : v_params) {
+            v_param_vals.push_back(v_pars[v_param_sx.name()]);
+        }
+
+        DM true_vac = true_vacuum;
+        DM false_vac = false_vacuum;
+
+        std::cout << "FALSE VAC: " << false_vac << std::endl;
+        std::cout << "TRUE VAC: " << true_vac << std::endl;
+
+        // Get the grid parameters (h_k, gamma, gamma_dot)
+        std::vector<double> grid_pars = get_grid_pars();
+
+        // Initialise NLP and get ansatz solution
+        auto t_nlp_start = high_resolution_clock::now();
+        NLP nlp = get_nlp(potential);
+        auto t_nlp_end = high_resolution_clock::now();
+        auto nlp_duration = duration_cast<microseconds>(t_nlp_end - t_nlp_start).count() * 1e-6;
+        std::cout << "Creating NLP took " << nlp_duration << "s" << std::endl;
+
+        auto t_ansatz_start = high_resolution_clock::now();
+        Ansatz a = get_ansatz(nlp.V_a, grid_pars, v_pars, true_vac, false_vac);
+        auto t_ansatz_end = high_resolution_clock::now();
+        auto ansatz_duration = duration_cast<microseconds>(t_ansatz_end - t_ansatz_start).count() * 1e-6;
+        std::cout << "Finding ansatz took " << ansatz_duration << "s" << std::endl;
+
+        // Evaluate T and V on the ansatz
+        DMDict argT(v_pars.begin(), v_pars.end());
+        argT["U"] = a.U0;
+        argT["par"] = grid_pars;
+        double T0 = nlp.T_a(argT).at("T").get_elements()[0];
+
+        DMDict argV(v_pars.begin(), v_pars.end());
+        argV["Phi"] = a.Phi0;
+        argV["par"] = grid_pars; 
+        double V0 = nlp.V_a(argV).at("V").get_elements()[0];
+
+        std::cout << "V(ansatz) = " << V0 << std::endl;
+        std::cout << "T(ansatz) = " << T0 << std::endl;
+        
+        /**** Bounds on control variables ****/
+        // Need to find a less opaque way of ensuring that 
+        // concatenated NLP inputs / bounds / start values 
+        // are consistently ordered!
+
+        // Limits for unbounded variables
+        std::vector<double> ubinf(n_phi, inf);
+        std::vector<double> lbinf(n_phi, -inf);
+
+        // Zero vector for constraint bounds
+        std::vector<double> zeroes(n_phi, 0);
+        
+        // Zero vector for collocation bounds
+        std::vector<double> zeroes_col(d*n_phi, 0);
+        std::vector<double> lbU, ubU;
+
+        // Derivative at origin fixed to zero
+        append_d(lbU, zeroes);
+        append_d(ubU, zeroes);
+
+        for (int k = 1; k <= N; ++k) {
+            append_d(lbU, lbinf);
+            append_d(ubU, ubinf);
+        }
+
+        /**** Bounds on state variables ****/
+        std::vector<double> lbPhi, ubPhi;
+
+        // Free endpoint states
+        for (int k = 0; k < N; ++k) {
+            append_d(lbPhi, lbinf);
+            append_d(ubPhi, ubinf);
+        }
+
+        // Final state, fixed to the false vacuum
+        append_d(lbPhi, false_vac.get_elements());
+        append_d(ubPhi, false_vac.get_elements());
+
+        // Free intermediate states
+        for (int k = 0; k < N; ++k) {
+            for (int j = 1; j <= d; ++j) {
+                append_d(lbPhi, lbinf);
+                append_d(ubPhi, ubinf);
+            }
+        }
+
+        /**** Bounds on constraints ****/
+        std::vector<double> lbg = {}; // Lower bounds for constraints
+        std::vector<double> ubg = {}; // Upper bounds for constraints
+
+        // Continuity equations
+        for (int k = 0; k < N; ++k) {
+            append_d(lbg, zeroes);
+            append_d(ubg, zeroes);
+        }
+
+        // Collocation equations and objective function
+        for (int k = 0; k < N; ++k) {
+            append_d(lbg, zeroes_col);
+            append_d(ubg, zeroes_col);
+        }
+
+        // Add potential constraint
+        lbg.push_back(0);
+        ubg.push_back(0);
+
+        /**** Concatenate NLP inputs ****/
+
+        std::vector<double> w0 = {}; // Initial values for decision variables
+        w0.insert(w0.end(), a.Phi0.begin(), a.Phi0.end());
+        w0.insert(w0.end(), a.U0.begin(), a.U0.end());
+    
+        /**** Concatenate decision variable bounds****/
+        std::vector<double> lbw = {}; 
+        std::vector<double> ubw = {};  
+
+        lbw.insert(lbw.end(), lbPhi.begin(), lbPhi.end());
+        ubw.insert(ubw.end(), ubPhi.begin(), ubPhi.end());
+        lbw.insert(lbw.end(), lbU.begin(), lbU.end());
+        ubw.insert(ubw.end(), ubU.begin(), ubU.end());
+
+        /**** Initialise and solve the NLP ****/
+
+        // Add V0 + v_params to parameters
+        std::vector<double> pars(grid_pars);
+        pars.push_back(V0);
+        pars.insert(pars.end(), v_param_vals.begin(), v_param_vals.end());
+
+        // Run the optimiser. This is the other bottleneck, so we time it too.
+        DMDict arg = {{"x0", w0}, {"lbx", lbw}, {"ubx", ubw}, {"lbg", lbg}, {"ubg", ubg}, {"p", pars}};
+        auto t_solve_start = high_resolution_clock::now();
+        DMDict res = nlp.nlp(arg);
+        auto t_solve_end = high_resolution_clock::now();
+        auto solve_duration = duration_cast<microseconds>(t_solve_end - t_solve_start).count() * 1e-6;
+        std::cout << "CasadiMaupertuisSolver - optimisation took " << solve_duration << " sec" << std::endl;
+
+        // Evaluate the objective & constraint on the result
+        DMDict ret_arg;
+        ret_arg["W"] = res["x"];
+        ret_arg["Par"] = grid_pars;
+        ret_arg["v_params"] = v_param_vals;
+
+        double Tret = nlp.T_ret(ret_arg).at("T").get_elements()[0];
+        double Vret = nlp.V_ret(ret_arg).at("V").get_elements()[0];
+
+        std::cout << "V(result) = " << Vret << std::endl;
+        std::cout << "T(result) = " << Tret << std::endl;
+        
+        // Calculate the action
+        double action = std::pow(((2.0 - d)/d)*(Tret/Vret), 0.5*d)*((2.0*Vret)/(2.0 - d));
+
+        // Return the result
+        std::vector<double> radii(N*(d + 1));
+        int c = 0;
+        for (int k = 0; k < N; ++k) {
+            for (int j = 0; j <= d; ++j) {
+                radii[c] = Tr(t_kj(k, j));
+                c++;
+            }
+        }
+
+        std::vector<double> phi_ret = nlp.Phi_ret(res["x"]).at(0).get_elements();
+        std::vector<std::vector<double>> profiles(radii.size());
+
+        c = 0;
+        for (int row = 0; row < radii.size(); ++row) {
+            profiles[row] = std::vector<double>(n_phi);
+            for (int col = 0; col < n_phi; ++col) {
+                profiles[row][col] = phi_ret[c];
+                c++;
+            }
+        }
+
+        return BouncePath(radii, profiles, action);
+    }
+
 private:
+    casadi::Function potential;
     casadi::SXVector v_params; // Vector of auxiliary parameter symbols
     int n_phi; // Number of field dimensions
     int n_dims; // Number of spatial dimensions
     double S_n; // Surface area of (d-1)-sphere
     int N; // Number of finite elements
-    int d; // Degree of interpolating polynomials
+    int d = 3; // Degree of interpolating polynomials
     std::vector<double> tau_root; // Vector of collocation points on [0,1)
     std::vector<double> t_k; // Element start times
     std::vector<double> h_k; // Element widths
@@ -537,191 +722,6 @@ private:
         nlp.Phi_ret = Phi_ret;
 
         return nlp;
-    }
-
-    BouncePath _solve(const casadi::Function& potential, 
-        const std::vector<double>& true_vacuum, const std::vector<double>& false_vacuum,
-        std::map<std::string, double> v_pars) const {
-
-        using namespace casadi;
-        using namespace std::chrono;
-
-        // Vector of (canonically ordered) parameter values
-        std::vector<double> v_param_vals;
-        for (auto & v_param_sx : v_params) {
-            v_param_vals.push_back(v_pars[v_param_sx.name()]);
-        }
-
-        DM true_vac = true_vacuum;
-        DM false_vac = false_vacuum;
-
-        std::cout << "FALSE VAC: " << false_vac << std::endl;
-        std::cout << "TRUE VAC: " << true_vac << std::endl;
-
-        // Get the grid parameters (h_k, gamma, gamma_dot)
-        std::vector<double> grid_pars = get_grid_pars();
-
-        // Initialise NLP and get ansatz solution
-        auto t_nlp_start = high_resolution_clock::now();
-        NLP nlp = get_nlp(potential);
-        auto t_nlp_end = high_resolution_clock::now();
-        auto nlp_duration = duration_cast<microseconds>(t_nlp_end - t_nlp_start).count() * 1e-6;
-        std::cout << "Creating NLP took " << nlp_duration << "s" << std::endl;
-
-        auto t_ansatz_start = high_resolution_clock::now();
-        Ansatz a = get_ansatz(nlp.V_a, grid_pars, v_pars, true_vac, false_vac);
-        auto t_ansatz_end = high_resolution_clock::now();
-        auto ansatz_duration = duration_cast<microseconds>(t_ansatz_end - t_ansatz_start).count() * 1e-6;
-        std::cout << "Finding ansatz took " << ansatz_duration << "s" << std::endl;
-
-        // Evaluate T and V on the ansatz
-        DMDict argT(v_pars.begin(), v_pars.end());
-        argT["U"] = a.U0;
-        argT["par"] = grid_pars;
-        double T0 = nlp.T_a(argT).at("T").get_elements()[0];
-
-        DMDict argV(v_pars.begin(), v_pars.end());
-        argV["Phi"] = a.Phi0;
-        argV["par"] = grid_pars; 
-        double V0 = nlp.V_a(argV).at("V").get_elements()[0];
-
-        std::cout << "V(ansatz) = " << V0 << std::endl;
-        std::cout << "T(ansatz) = " << T0 << std::endl;
-        
-        /**** Bounds on control variables ****/
-        // Need to find a less opaque way of ensuring that 
-        // concatenated NLP inputs / bounds / start values 
-        // are consistently ordered!
-
-        // Limits for unbounded variables
-        std::vector<double> ubinf(n_phi, inf);
-        std::vector<double> lbinf(n_phi, -inf);
-
-        // Zero vector for constraint bounds
-        std::vector<double> zeroes(n_phi, 0);
-        
-        // Zero vector for collocation bounds
-        std::vector<double> zeroes_col(d*n_phi, 0);
-        std::vector<double> lbU, ubU;
-
-        // Derivative at origin fixed to zero
-        append_d(lbU, zeroes);
-        append_d(ubU, zeroes);
-
-        for (int k = 1; k <= N; ++k) {
-            append_d(lbU, lbinf);
-            append_d(ubU, ubinf);
-        }
-
-        /**** Bounds on state variables ****/
-        std::vector<double> lbPhi, ubPhi;
-
-        // Free endpoint states
-        for (int k = 0; k < N; ++k) {
-            append_d(lbPhi, lbinf);
-            append_d(ubPhi, ubinf);
-        }
-
-        // Final state, fixed to the false vacuum
-        append_d(lbPhi, false_vac.get_elements());
-        append_d(ubPhi, false_vac.get_elements());
-
-        // Free intermediate states
-        for (int k = 0; k < N; ++k) {
-            for (int j = 1; j <= d; ++j) {
-                append_d(lbPhi, lbinf);
-                append_d(ubPhi, ubinf);
-            }
-        }
-
-        /**** Bounds on constraints ****/
-        std::vector<double> lbg = {}; // Lower bounds for constraints
-        std::vector<double> ubg = {}; // Upper bounds for constraints
-
-        // Continuity equations
-        for (int k = 0; k < N; ++k) {
-            append_d(lbg, zeroes);
-            append_d(ubg, zeroes);
-        }
-
-        // Collocation equations and objective function
-        for (int k = 0; k < N; ++k) {
-            append_d(lbg, zeroes_col);
-            append_d(ubg, zeroes_col);
-        }
-
-        // Add potential constraint
-        lbg.push_back(0);
-        ubg.push_back(0);
-
-        /**** Concatenate NLP inputs ****/
-
-        std::vector<double> w0 = {}; // Initial values for decision variables
-        w0.insert(w0.end(), a.Phi0.begin(), a.Phi0.end());
-        w0.insert(w0.end(), a.U0.begin(), a.U0.end());
-    
-        /**** Concatenate decision variable bounds****/
-        std::vector<double> lbw = {}; 
-        std::vector<double> ubw = {};  
-
-        lbw.insert(lbw.end(), lbPhi.begin(), lbPhi.end());
-        ubw.insert(ubw.end(), ubPhi.begin(), ubPhi.end());
-        lbw.insert(lbw.end(), lbU.begin(), lbU.end());
-        ubw.insert(ubw.end(), ubU.begin(), ubU.end());
-
-        /**** Initialise and solve the NLP ****/
-
-        // Add V0 + v_params to parameters
-        std::vector<double> pars(grid_pars);
-        pars.push_back(V0);
-        pars.insert(pars.end(), v_param_vals.begin(), v_param_vals.end());
-
-        // Run the optimiser. This is the other bottleneck, so we time it too.
-        DMDict arg = {{"x0", w0}, {"lbx", lbw}, {"ubx", ubw}, {"lbg", lbg}, {"ubg", ubg}, {"p", pars}};
-        auto t_solve_start = high_resolution_clock::now();
-        DMDict res = nlp.nlp(arg);
-        auto t_solve_end = high_resolution_clock::now();
-        auto solve_duration = duration_cast<microseconds>(t_solve_end - t_solve_start).count() * 1e-6;
-        std::cout << "CasadiMaupertuisSolver - optimisation took " << solve_duration << " sec" << std::endl;
-
-        // Evaluate the objective & constraint on the result
-        DMDict ret_arg;
-        ret_arg["W"] = res["x"];
-        ret_arg["Par"] = grid_pars;
-        ret_arg["v_params"] = v_param_vals;
-
-        double Tret = nlp.T_ret(ret_arg).at("T").get_elements()[0];
-        double Vret = nlp.V_ret(ret_arg).at("V").get_elements()[0];
-
-        std::cout << "V(result) = " << Vret << std::endl;
-        std::cout << "T(result) = " << Tret << std::endl;
-        
-        // Calculate the action
-        double action = std::pow(((2.0 - d)/d)*(Tret/Vret), 0.5*d)*((2.0*Vret)/(2.0 - d));
-
-        // Return the result
-        std::vector<double> radii;
-        int c = 0;
-        for (int k = 0; k < N; ++k) {
-            for (int j = 0; j <= d; ++j) {
-                radii[c] = Tr(t_kj(k, j));
-                c++;
-            }
-        }
-
-        std::vector<double> phi_ret = nlp.Phi_ret(res["x"]).at(0).get_elements();
-        std::vector<std::vector<double>> profiles(radii.size());
-
-        c = 0;
-        for (int row = 0; row < radii.size(); ++row) {
-            profiles[row] = std::vector<double>(n_phi);
-            for (int col = 0; col < n_phi; ++col) {
-                profiles[row][col] = phi_ret[c];
-                c++;
-            }
-        }
-
-        return BouncePath(radii, profiles, action);
     }
 };
 

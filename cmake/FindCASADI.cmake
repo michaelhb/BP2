@@ -1,29 +1,26 @@
+# Find CasADi header
 find_path(CASADI_INCLUDE_DIR
   casadi/casadi.hpp
   HINTS $ENV{CASADI_PREFIX}/include
 )
 
-if(CASADI_INCLUDE_DIR)
-  set(CASADI_INCLUDE_DIR ${CASADI_INCLUDE_DIR}/casadi)
-  set(CASADI_FOUND_INCLUDE TRUE)
-  message(STATUS "Found CasADi include dir: ${CASADI_INCLUDE_DIR}")
+# Find CasADi shared library
+find_library(CASADI_LIBRARY NAMES casadi
+    HINTS ${CASADI_INCLUDE_DIR}/../lib $ENV{CASADI_PREFIX}/lib
+)
+
+message("CASADI_INCLUDE_DIR: ${CASADI_INCLUDE_DIR}")
+message("CASADI_LIBRARY: ${CASADI_LIBRARY}")
+
+if (CASADI_INCLUDE_DIR AND CASADI_LIBRARY)
+    # Create a target to represent the library
+    add_library(casadi SHARED IMPORTED)
+
+    # Attach the shared library to the target
+    set_target_properties(casadi PROPERTIES IMPORTED_LOCATION ${CASADI_LIBRARY})
+
+    # Attach the header to the target
+    set_target_properties(casadi PROPERTIES INTERFACE_INCLUDE_DIRECTORIES ${CASADI_INCLUDE_DIR})
 else()
-  message(STATUS "Could not find CasADi include dir")
-endif()
-
-find_library(CASADI_LIBRARY
-    NAMES casadi
-    HINTS ${CASADI_INCLUDE_DIR}/../lib $ENV{CASADI_PREFIX}/lib)
-if(CASADI_LIBRARY)
-    set(CASADI_LIBRARIES ${CASADI_LIBRARIES} ${CASADI_LIBRARY})
-endif()
-
-if(CASADI_LIBRARIES)
-  message(STATUS "Found CasADi libs: ${CASADI_LIBRARIES}")
-else()
-  message(STATUS "Could not find CasADi libs")
-endif()
-
-if(CASADI_FOUND_INCLUDE AND CASADI_LIBRARIES)
-  set(CASADI_FOUND TRUE)
+    message(FATAL_ERROR "Could not find CasADi")
 endif()

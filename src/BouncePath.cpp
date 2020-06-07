@@ -3,7 +3,7 @@
 
 namespace BubbleProfiler2 {
 
-void BouncePath::plot_profiles(double r_max = -1., std::string title = "") const {
+void BouncePath::plot_profiles(double r_max, std::string title) const {
         int n_phi = profiles[0].size();
         int n_rho = profiles.size();
 

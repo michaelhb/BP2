@@ -1,2 +1,1 @@
-# BP2
-BubbleProfiler 2
+# BP2 (best bounce solver in the universe)

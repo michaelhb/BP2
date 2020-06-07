@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.9)
+cmake_minimum_required(VERSION 3.9) # modern cmake pls
 
 project(BubbleProfiler2
     VERSION 0.1
