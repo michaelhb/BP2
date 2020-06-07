@@ -75,7 +75,10 @@ int main() {
     using namespace BubbleProfiler2;
     using namespace casadi;
 
+    // Degree of the polynomial potential
     int order = 5;
+
+    // Thinness parameter (smaller values -> thinner walled)
     double delta = 0.4;
 
     PolynomialPotential pp = get_potential(order);
