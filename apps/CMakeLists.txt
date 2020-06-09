@@ -1,2 +1,1 @@
-add_subdirectory(TestApp)
 add_subdirectory(Polynomials)

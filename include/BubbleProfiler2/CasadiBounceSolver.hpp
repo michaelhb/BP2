@@ -12,9 +12,9 @@
 namespace BubbleProfiler2 {
 
 struct Ansatz {
-    double V0;
-    std::vector<double> Phi0;
-    std::vector<double> U0;
+    double V0; // (actual) value of V constraint
+    std::vector<double> Phi0; // Ansatz field values
+    std::vector<double> U0; // Anstatz control values
 };
 
 struct NLP {
@@ -22,11 +22,25 @@ struct NLP {
     
     // Separate T/V for ansatz / return is 
     // ugly and should be done better 
-    casadi::Function T_a;
-    casadi::Function T_ret;
-    casadi::Function V_a;
-    casadi::Function V_ret;
-    casadi::Function Phi_ret;
+    casadi::Function T_a; // T function (for ansatz)
+    casadi::Function T_ret; // T function (for return)
+    casadi::Function V_a; // V function (for ansatz)
+    casadi::Function V_ret; // T function (for return)
+    casadi::Function Phi_ret; // Extract state variables from solution
+};
+
+struct Static_bounds {
+    // Control variable bounds
+    std::vector<double> lbU;
+    std::vector<double> ubU;
+
+    // State variable bounds
+    std::vector<double> lbPhi; 
+    std::vector<double> ubPhi;
+
+    // Constraint function bounds
+    std::vector<double> lbg;
+    std::vector<double> ubg;
 };
 
 class CasadiBounceSolver {
@@ -58,6 +72,10 @@ private:
 
     //! Construct the parametric NLP we solve to find the bounce
     NLP get_nlp(const casadi::Function& potential) const;
+
+    //! Get static bounds on states, controls and constraints
+    Static_bounds get_static_bounds(std::vector<double> false_vacuum) const;
+
 
     //! Time at element k, collocation point j
     double t_kj(int k, int j) const {
@@ -141,7 +159,6 @@ private:
         return par0;
     }
 
-    
 };
 
 }

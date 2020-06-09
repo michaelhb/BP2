@@ -69,6 +69,86 @@ CasadiBounceSolver::CasadiBounceSolver(casadi::Function potential_, int n_phi_,
         nlp = get_nlp(potential);
     }
 
+Static_bounds CasadiBounceSolver::get_static_bounds(std::vector<double> false_vac) const {
+    using namespace casadi;
+    /**** Bounds on control variables ****/
+    // Need to find a less opaque way of ensuring that 
+    // concatenated NLP inputs / bounds / start values 
+    // are consistently ordered!
+
+    // Limits for unbounded variables
+    std::vector<double> ubinf(n_phi, inf);
+    std::vector<double> lbinf(n_phi, -inf);
+
+    // Zero vector for constraint bounds
+    std::vector<double> zeroes(n_phi, 0);
+    
+    // Zero vector for collocation bounds
+    std::vector<double> zeroes_col(d*n_phi, 0);
+    std::vector<double> lbU, ubU;
+
+    // Derivative at origin fixed to zero
+    append_d(lbU, zeroes);
+    append_d(ubU, zeroes);
+
+    for (int k = 1; k <= N; ++k) {
+        append_d(lbU, lbinf);
+        append_d(ubU, ubinf);
+    }
+
+    /**** Bounds on state variables ****/
+    std::vector<double> lbPhi, ubPhi;
+
+    // Free endpoint states
+    for (int k = 0; k < N; ++k) {
+        append_d(lbPhi, lbinf);
+        append_d(ubPhi, ubinf);
+    }
+
+    // Final state, fixed to the false vacuum
+    append_d(lbPhi, false_vac);
+    append_d(ubPhi, false_vac);
+
+    // Free intermediate states
+    for (int k = 0; k < N; ++k) {
+        for (int j = 1; j <= d; ++j) {
+            append_d(lbPhi, lbinf);
+            append_d(ubPhi, ubinf);
+        }
+    }
+
+    /**** Bounds on constraints ****/
+    std::vector<double> lbg = {}; // Lower bounds for constraints
+    std::vector<double> ubg = {}; // Upper bounds for constraints
+
+    // Continuity equations
+    for (int k = 0; k < N; ++k) {
+        append_d(lbg, zeroes);
+        append_d(ubg, zeroes);
+    }
+
+    // Collocation equations and objective function
+    for (int k = 0; k < N; ++k) {
+        append_d(lbg, zeroes_col);
+        append_d(ubg, zeroes_col);
+    }
+
+    // Add potential constraint
+    lbg.push_back(0);
+    ubg.push_back(0);
+
+    // Return results
+    Static_bounds bounds;
+    bounds.lbU = lbU;
+    bounds.ubU = ubU;
+    bounds.lbPhi = lbPhi;
+    bounds.ubPhi = ubPhi;
+    bounds.lbg = lbg;
+    bounds.ubg = ubg;
+
+    return bounds;
+}
+
 NLP CasadiBounceSolver::get_nlp(const casadi::Function& potential) const {
     using namespace casadi;
     using namespace std::chrono;
@@ -418,8 +498,6 @@ Ansatz CasadiBounceSolver::get_ansatz(casadi::Function fV,
 BouncePath CasadiBounceSolver::solve(const std::vector<double>& true_vacuum, const std::vector<double>& false_vacuum,
     std::map<std::string, double> v_pars) const {
 
-    // TODO this should be split into multiple methods
-
     using namespace casadi;
     using namespace std::chrono;
 
@@ -464,87 +542,21 @@ BouncePath CasadiBounceSolver::solve(const std::vector<double>& true_vacuum, con
 
     std::cout << "V(ansatz) = " << V0 << std::endl;
     std::cout << "T(ansatz) = " << T0 << std::endl;
-    
-    /**** Bounds on control variables ****/
-    // Need to find a less opaque way of ensuring that 
-    // concatenated NLP inputs / bounds / start values 
-    // are consistently ordered!
-
-    // Limits for unbounded variables
-    std::vector<double> ubinf(n_phi, inf);
-    std::vector<double> lbinf(n_phi, -inf);
-
-    // Zero vector for constraint bounds
-    std::vector<double> zeroes(n_phi, 0);
-    
-    // Zero vector for collocation bounds
-    std::vector<double> zeroes_col(d*n_phi, 0);
-    std::vector<double> lbU, ubU;
-
-    // Derivative at origin fixed to zero
-    append_d(lbU, zeroes);
-    append_d(ubU, zeroes);
-
-    for (int k = 1; k <= N; ++k) {
-        append_d(lbU, lbinf);
-        append_d(ubU, ubinf);
-    }
-
-    /**** Bounds on state variables ****/
-    std::vector<double> lbPhi, ubPhi;
-
-    // Free endpoint states
-    for (int k = 0; k < N; ++k) {
-        append_d(lbPhi, lbinf);
-        append_d(ubPhi, ubinf);
-    }
-
-    // Final state, fixed to the false vacuum
-    append_d(lbPhi, false_vac.get_elements());
-    append_d(ubPhi, false_vac.get_elements());
-
-    // Free intermediate states
-    for (int k = 0; k < N; ++k) {
-        for (int j = 1; j <= d; ++j) {
-            append_d(lbPhi, lbinf);
-            append_d(ubPhi, ubinf);
-        }
-    }
-
-    /**** Bounds on constraints ****/
-    std::vector<double> lbg = {}; // Lower bounds for constraints
-    std::vector<double> ubg = {}; // Upper bounds for constraints
-
-    // Continuity equations
-    for (int k = 0; k < N; ++k) {
-        append_d(lbg, zeroes);
-        append_d(ubg, zeroes);
-    }
-
-    // Collocation equations and objective function
-    for (int k = 0; k < N; ++k) {
-        append_d(lbg, zeroes_col);
-        append_d(ubg, zeroes_col);
-    }
-
-    // Add potential constraint
-    lbg.push_back(0);
-    ubg.push_back(0);
 
     /**** Concatenate NLP inputs ****/
-
     std::vector<double> w0 = {}; // Initial values for decision variables
     w0.insert(w0.end(), a.Phi0.begin(), a.Phi0.end());
     w0.insert(w0.end(), a.U0.begin(), a.U0.end());
 
     /**** Concatenate decision variable bounds****/
+    Static_bounds bounds = get_static_bounds(false_vacuum);
     std::vector<double> lbw = {}; 
     std::vector<double> ubw = {};  
 
-    lbw.insert(lbw.end(), lbPhi.begin(), lbPhi.end());
-    ubw.insert(ubw.end(), ubPhi.begin(), ubPhi.end());
-    lbw.insert(lbw.end(), lbU.begin(), lbU.end());
-    ubw.insert(ubw.end(), ubU.begin(), ubU.end());
+    lbw.insert(lbw.end(), bounds.lbPhi.begin(), bounds.lbPhi.end());
+    ubw.insert(ubw.end(), bounds.ubPhi.begin(), bounds.ubPhi.end());
+    lbw.insert(lbw.end(), bounds.lbU.begin(), bounds.lbU.end());
+    ubw.insert(ubw.end(), bounds.ubU.begin(), bounds.ubU.end());
 
     /**** Initialise and solve the NLP ****/
 
@@ -554,7 +566,7 @@ BouncePath CasadiBounceSolver::solve(const std::vector<double>& true_vacuum, con
     pars.insert(pars.end(), v_param_vals.begin(), v_param_vals.end());
 
     // Run the optimiser. This is the other bottleneck, so we time it too.
-    DMDict arg = {{"x0", w0}, {"lbx", lbw}, {"ubx", ubw}, {"lbg", lbg}, {"ubg", ubg}, {"p", pars}};
+    DMDict arg = {{"x0", w0}, {"lbx", lbw}, {"ubx", ubw}, {"lbg", bounds.lbg}, {"ubg", bounds.ubg}, {"p", pars}};
     auto t_solve_start = high_resolution_clock::now();
     DMDict res = nlp.nlp(arg);
     auto t_solve_end = high_resolution_clock::now();
