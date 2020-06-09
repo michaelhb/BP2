@@ -501,30 +501,12 @@ BouncePath CasadiBounceSolver::solve(const std::vector<double>& true_vacuum, con
     using namespace casadi;
     using namespace std::chrono;
 
-    // Vector of (canonically ordered) parameter values
-    std::vector<double> v_param_vals;
-    for (auto & v_param_sx : v_params) {
-        v_param_vals.push_back(v_pars[v_param_sx.name()]);
-    }
-
-    DM true_vac = true_vacuum;
-    DM false_vac = false_vacuum;
-
-    std::cout << "FALSE VAC: " << false_vac << std::endl;
-    std::cout << "TRUE VAC: " << true_vac << std::endl;
-
-    // Get the grid parameters (h_k, gamma, gamma_dot)
+    // Get concatenated grid parameters (h_k, gamma, gamma_dot)
     std::vector<double> grid_pars = get_grid_pars();
 
-    // Initialise NLP and get ansatz solution
-    auto t_nlp_start = high_resolution_clock::now();
-    NLP nlp = get_nlp(potential);
-    auto t_nlp_end = high_resolution_clock::now();
-    auto nlp_duration = duration_cast<microseconds>(t_nlp_end - t_nlp_start).count() * 1e-6;
-    std::cout << "Creating NLP took " << nlp_duration << "s" << std::endl;
-
+    // Find the ansatz solution
     auto t_ansatz_start = high_resolution_clock::now();
-    Ansatz a = get_ansatz(nlp.V_a, grid_pars, v_pars, true_vac, false_vac);
+    Ansatz a = get_ansatz(nlp.V_a, grid_pars, v_pars, true_vacuum, false_vacuum);
     auto t_ansatz_end = high_resolution_clock::now();
     auto ansatz_duration = duration_cast<microseconds>(t_ansatz_end - t_ansatz_start).count() * 1e-6;
     std::cout << "Finding ansatz took " << ansatz_duration << "s" << std::endl;
@@ -560,7 +542,13 @@ BouncePath CasadiBounceSolver::solve(const std::vector<double>& true_vacuum, con
 
     /**** Initialise and solve the NLP ****/
 
-    // Add V0 + v_params to parameters
+    // Vector of (canonically ordered) model parameter values
+    std::vector<double> v_param_vals;
+    for (auto & v_param_sx : v_params) {
+        v_param_vals.push_back(v_pars[v_param_sx.name()]);
+    }
+
+    // Concat the grid params, V0 param value, and model params
     std::vector<double> pars(grid_pars);
     pars.push_back(V0);
     pars.insert(pars.end(), v_param_vals.begin(), v_param_vals.end());
