@@ -12,7 +12,13 @@
 namespace BubbleProfiler2 {
 
 struct Ansatz {
+    // TODO: this should probably be a class...
+
     double V0; // (actual) value of V constraint
+    double r0; // Estimated wall location (on [0,inf])
+    double sigma; // Estimate wall thickness scale
+    casadi::DM true_vac;
+    casadi::DM false_vac;
     std::vector<double> Phi0; // Ansatz field values
     std::vector<double> U0; // Anstatz control values
 };
@@ -113,6 +119,7 @@ private:
     std::vector<double> t_k; // Element start times
     std::vector<double> h_k; // Element widths
     double default_grid_scale = 15.0; // Multiplying factor for gamma (TODO make dynamic)
+    double r_point_frac = 0.8; // Fraction of points to place before the bubble wall when solving
     NLP nlp; // Algebraic representation of optimisation problem
     std::vector<std::vector<double> > C; // Coefficients of the collocation equation
     std::vector<double> D; // Coefficients of the continuity equation
@@ -124,7 +131,6 @@ private:
 
     //! Get static bounds on states, controls and constraints
     Static_bounds get_static_bounds(std::vector<double> false_vacuum) const;
-
 
     //! Time at element k, collocation point j
     double t_kj(int k, int j) const {
@@ -162,6 +168,17 @@ private:
             CompactGrid grid,
             std::map<std::string, double> v_pars, 
             casadi::DM true_vac, casadi::DM false_vac) const;
+
+    //! Find the grid scale that places r_point_frac points before 
+    // the estimated bubble wall
+    double find_grid_scale(double r0) const {
+        // r_point_frac -> [-1, 1]
+        double t_point_frac = 2.0*r_point_frac - 1;
+        return r0/(log((2.0)/(1 - t_point_frac)));
+    }
+
+    //! Rescale the ansatz solution, after adjusting the grid scale
+    Ansatz rescale_ansatz(Ansatz ansatz, CompactGrid grid) const;
 
     //! Utility method: generate subscripted variable names
     std::string varname(std::string prefix, std::vector<int> indices) const {

@@ -79,13 +79,13 @@ int main() {
     int order = 5;
 
     // Thinness parameter (smaller values -> thinner walled)
-    double delta = 0.4;
+    double delta = 0.8;
 
     PolynomialPotential pp = get_potential(order);
     std::vector<double> true_vac = find_true_vac(pp, delta);
     std::vector<double> false_vac(order, 0.);
 
-    CasadiBounceSolver solver = CasadiBounceSolver(pp.fV, order, {pp.delta});
+    CasadiBounceSolver solver = CasadiBounceSolver(pp.fV, order, {pp.delta}, 3, 100);
 
     std::map<std::string, double> v_pars;
     v_pars["delta"] = delta;
@@ -93,5 +93,5 @@ int main() {
     BouncePath path = solver.solve(true_vac, false_vac, v_pars);
     
     std::cout << "Bounce action: " << path.get_action() << std::endl;
-    path.plot_profiles(5., "title");
+    path.plot_profiles(20., "title");
 }
