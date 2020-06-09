@@ -548,11 +548,11 @@ BouncePath CasadiBounceSolver::solve(const std::vector<double>& true_vacuum, con
 
     // Get concatenated grid parameters (h_k, gamma, gamma_dot)
     // std::vector<double> grid_pars = get_grid_pars();
-    CompactGrid default_grid = get_grid(default_grid_scale);
+    CompactGrid grid = get_grid(default_grid_scale);
 
     // Find the ansatz solution
     auto t_ansatz_start = high_resolution_clock::now();
-    Ansatz ansatz = get_ansatz(nlp.V_a, default_grid, v_pars, true_vacuum, false_vacuum);
+    Ansatz ansatz = get_ansatz(nlp.V_a, grid, v_pars, true_vacuum, false_vacuum);
     auto t_ansatz_end = high_resolution_clock::now();
     auto ansatz_duration = duration_cast<microseconds>(t_ansatz_end - t_ansatz_start).count() * 1e-6;
     std::cout << "Finding ansatz took " << ansatz_duration << "s" << std::endl;
@@ -560,12 +560,12 @@ BouncePath CasadiBounceSolver::solve(const std::vector<double>& true_vacuum, con
     // Evaluate T and V on the ansatz
     DMDict argT(v_pars.begin(), v_pars.end());
     argT["U"] = ansatz.U0;
-    argT["par"] = default_grid.concatenate();
+    argT["par"] = grid.concatenate();
     double T0 = nlp.T_a(argT).at("T").get_elements()[0];
 
     DMDict argV(v_pars.begin(), v_pars.end());
     argV["Phi"] = ansatz.Phi0;
-    argV["par"] = default_grid.concatenate(); 
+    argV["par"] = grid.concatenate(); 
     double V0 = nlp.V_a(argV).at("V").get_elements()[0];
 
     std::cout << "V(ansatz) = " << V0 << std::endl;
@@ -574,11 +574,17 @@ BouncePath CasadiBounceSolver::solve(const std::vector<double>& true_vacuum, con
     // Create an adjusted grid to increase the number of points 
     // near the expected bubble wall location
     double new_scale = find_grid_scale(ansatz.r0);
-    CompactGrid scaled_grid = get_grid(new_scale);
+
+    grid = get_grid(new_scale);
     std::cout << "Adjusted grid scale to " << new_scale << std::endl;
 
+    // if (new_scale > default_grid_scale) {
+    //     grid = get_grid(new_scale);
+    //     std::cout << "Adjusted grid scale to " << new_scale << std::endl;
+    // }
+
     // Rescale the ansatz to the new grid
-    Ansatz scaled_ansatz = rescale_ansatz(ansatz, scaled_grid);
+    Ansatz scaled_ansatz = rescale_ansatz(ansatz, grid);
 
     /**** Concatenate NLP initial state ****/
     std::vector<double> w0 = {}; // Initial values for decision variables
@@ -604,7 +610,7 @@ BouncePath CasadiBounceSolver::solve(const std::vector<double>& true_vacuum, con
     }
 
     // Concat the grid params, V0 param value, and model params
-    std::vector<double> pars(scaled_grid.concatenate());
+    std::vector<double> pars(grid.concatenate());
     pars.push_back(V0);
     pars.insert(pars.end(), v_param_vals.begin(), v_param_vals.end());
 
@@ -619,7 +625,7 @@ BouncePath CasadiBounceSolver::solve(const std::vector<double>& true_vacuum, con
     // Evaluate the objective & constraint on the result
     DMDict ret_arg;
     ret_arg["W"] = res["x"];
-    ret_arg["Par"] = scaled_grid.concatenate();
+    ret_arg["Par"] = grid.concatenate();
     ret_arg["v_params"] = v_param_vals;
 
     double Tret = nlp.T_ret(ret_arg).at("T").get_elements()[0];
@@ -636,7 +642,7 @@ BouncePath CasadiBounceSolver::solve(const std::vector<double>& true_vacuum, con
     int c = 0;
     for (int k = 0; k < N; ++k) {
         for (int j = 0; j <= d; ++j) {
-            radii[c] = Tr(t_kj(k, j), scaled_grid.grid_scale());
+            radii[c] = Tr(t_kj(k, j), grid.grid_scale());
             c++;
         }
     }

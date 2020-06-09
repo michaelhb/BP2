@@ -76,10 +76,10 @@ int main() {
     using namespace casadi;
 
     // Degree of the polynomial potential
-    int order = 5;
+    int order = 4;
 
     // Thinness parameter (smaller values -> thinner walled)
-    double delta = 0.8;
+    double delta = 0.01;
 
     PolynomialPotential pp = get_potential(order);
     std::vector<double> true_vac = find_true_vac(pp, delta);

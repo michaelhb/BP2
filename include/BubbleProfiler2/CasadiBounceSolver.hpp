@@ -119,7 +119,7 @@ private:
     std::vector<double> t_k; // Element start times
     std::vector<double> h_k; // Element widths
     double default_grid_scale = 15.0; // Multiplying factor for gamma (TODO make dynamic)
-    double r_point_frac = 0.8; // Fraction of points to place before the bubble wall when solving
+    double r_point_frac = 0.5; // Fraction of points to place before the bubble wall when solving
     NLP nlp; // Algebraic representation of optimisation problem
     std::vector<std::vector<double> > C; // Coefficients of the collocation equation
     std::vector<double> D; // Coefficients of the continuity equation
