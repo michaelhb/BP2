@@ -3,8 +3,8 @@
 namespace BubbleProfiler2 {
 
 CasadiBounceSolver::CasadiBounceSolver(casadi::Function potential_, int n_phi_,
-        casadi::SXVector v_params_, int n_dims_, int N_) :
-        n_phi(n_phi_), n_dims(n_dims_), N(N_), v_params(v_params_), potential(potential_) {
+        casadi::SXVector v_params_, int n_dims_, int N_, bool quiet_) :
+        n_phi(n_phi_), n_dims(n_dims_), N(N_), v_params(v_params_), potential(potential_), quiet(quiet_) {
         using namespace casadi;
 
         // TODO most of what's below probably shouldn't live in the 
@@ -389,11 +389,20 @@ NLP CasadiBounceSolver::get_nlp(const casadi::Function& potential) const {
     nlp_opt["expand"] = false;
     nlp_opt["ipopt.tol"] = 1e-3;
     nlp_opt["ipopt.constr_viol_tol"] = 1e-3;
+    // nlp_opt["ipopt.print_level"] = 6;
+    // nlp_opt["ipopt.nlp_scaling_method"] = "gradient-based";
+    // nlp_opt["ipopt.nlp_scaling_max_gradient"] = 10.;
+
+    if (quiet) {
+        nlp_opt["ipopt.print_level"] = 0;
+        nlp_opt["print_time"] = 0;
+        nlp_opt["ipopt.sb"] = "yes";
+    }
 
     Function solver = nlpsol("nlpsol", "ipopt", nlp_arg, nlp_opt);
     auto t_setup_end = high_resolution_clock::now();
     auto setup_duration = duration_cast<microseconds>(t_setup_end - t_setup_start).count() * 1e-6;
-    std::cout << "CasadiMaupertuisSolver - setup took " << setup_duration << " sec" << std::endl;
+    if (!quiet) std::cout << "CasadiMaupertuisSolver - setup took " << setup_duration << " sec" << std::endl;
     
     NLP nlp;
     nlp.nlp = solver;
@@ -454,8 +463,10 @@ Ansatz CasadiBounceSolver::get_ansatz(casadi::Function fV,
         
         V_mid = fV(argV).at("V").get_elements()[0];
 
-        std::cout << "r0 = " << r0 << ", sigma = " << sigma 
-                    << ", V_mid = " << V_mid << std::endl; 
+        if (!quiet) {
+            std::cout << "r0 = " << r0 << ", sigma = " << sigma 
+                        << ", V_mid = " << V_mid << std::endl; 
+        }
 
         if (V_mid < targetV) {
             sig_lower  = sigma;
@@ -489,8 +500,10 @@ Ansatz CasadiBounceSolver::get_ansatz(casadi::Function fV,
     // Avoid Tr(1) singularity
     append_d(U0, std::vector<double>(false_vac.size1(), 0));
 
-    std::cout << "Ansatz r0 = " << r0 << ", sigma = " << sigma << std::endl;
-    
+    if (!quiet) {
+        std::cout << "Ansatz r0 = " << r0 << ", sigma = " << sigma << std::endl;
+    }
+
     a.V0 = V_mid;
     a.r0 = r0;
     a.sigma = sigma;
@@ -555,7 +568,7 @@ BouncePath CasadiBounceSolver::solve(const std::vector<double>& true_vacuum, con
     Ansatz ansatz = get_ansatz(nlp.V_a, grid, v_pars, true_vacuum, false_vacuum);
     auto t_ansatz_end = high_resolution_clock::now();
     auto ansatz_duration = duration_cast<microseconds>(t_ansatz_end - t_ansatz_start).count() * 1e-6;
-    std::cout << "Finding ansatz took " << ansatz_duration << "s" << std::endl;
+    if (!quiet) std::cout << "Finding ansatz took " << ansatz_duration << "s" << std::endl;
     
     // Evaluate T and V on the ansatz
     DMDict argT(v_pars.begin(), v_pars.end());
@@ -568,15 +581,15 @@ BouncePath CasadiBounceSolver::solve(const std::vector<double>& true_vacuum, con
     argV["par"] = grid.concatenate(); 
     double V0 = nlp.V_a(argV).at("V").get_elements()[0];
 
-    std::cout << "V(ansatz) = " << V0 << std::endl;
-    std::cout << "T(ansatz) = " << T0 << std::endl;
+    if (!quiet) std::cout << "V(ansatz) = " << V0 << std::endl;
+    if (!quiet) std::cout << "T(ansatz) = " << T0 << std::endl;
 
     // Create an adjusted grid to increase the number of points 
     // near the expected bubble wall location
     double new_scale = find_grid_scale(ansatz.r0);
 
     grid = get_grid(new_scale);
-    std::cout << "Adjusted grid scale to " << new_scale << std::endl;
+    if (!quiet) std::cout << "Adjusted grid scale to " << new_scale << std::endl;
 
     // if (new_scale > default_grid_scale) {
     //     grid = get_grid(new_scale);
@@ -620,7 +633,7 @@ BouncePath CasadiBounceSolver::solve(const std::vector<double>& true_vacuum, con
     DMDict res = nlp.nlp(arg);
     auto t_solve_end = high_resolution_clock::now();
     auto solve_duration = duration_cast<microseconds>(t_solve_end - t_solve_start).count() * 1e-6;
-    std::cout << "CasadiMaupertuisSolver - optimisation took " << solve_duration << " sec" << std::endl;
+    if (!quiet) std::cout << "CasadiMaupertuisSolver - optimisation took " << solve_duration << " sec" << std::endl;
 
     // Evaluate the objective & constraint on the result
     DMDict ret_arg;
@@ -631,8 +644,8 @@ BouncePath CasadiBounceSolver::solve(const std::vector<double>& true_vacuum, con
     double Tret = nlp.T_ret(ret_arg).at("T").get_elements()[0];
     double Vret = nlp.V_ret(ret_arg).at("V").get_elements()[0];
 
-    std::cout << "V(result) = " << Vret << std::endl;
-    std::cout << "T(result) = " << Tret << std::endl;
+    if (!quiet) std::cout << "V(result) = " << Vret << std::endl;
+    if (!quiet) std::cout << "T(result) = " << Tret << std::endl;
     
     // Calculate the action
     double action = std::pow(((2.0 - d)/d)*(Tret/Vret), 0.5*d)*((2.0*Vret)/(2.0 - d));

@@ -102,7 +102,7 @@ class CasadiBounceSolver {
 
 public:
     CasadiBounceSolver(casadi::Function potential_, int n_phi_,
-        casadi::SXVector v_params_ = {}, int n_dims_ = 3, int N_ = 100);
+        casadi::SXVector v_params_ = {}, int n_dims_ = 3, int N_ = 100, bool quiet_ = false);
 
     BouncePath solve(const std::vector<double>& true_vacuum, const std::vector<double>& false_vacuum,
         std::map<std::string, double> v_pars) const;
@@ -125,6 +125,7 @@ private:
     std::vector<double> D; // Coefficients of the continuity equation
     std::vector<double> B; // Coefficients for Gaussian quadrature 
     std::vector<casadi::Polynomial> P; // Basis of legendre polynomials
+    bool quiet; // Suppress IPOPT output
 
     //! Construct the parametric NLP we solve to find the bounce
     NLP get_nlp(const casadi::Function& potential) const;

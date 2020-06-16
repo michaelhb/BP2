@@ -19,7 +19,11 @@ std::vector<double> find_minimum(casadi::Function potential,
 
     SX f = potential(argV).at("V");        
     SXDict nlp_arg = {{"f", f}, {"x", arg}, {"p", vertcat(params)}};
-    Function solver = nlpsol("nlpsol", "ipopt", nlp_arg);
+    Dict nlp_opt = Dict();
+    nlp_opt["ipopt.print_level"] = 0;
+    nlp_opt["print_time"] = 0;
+    nlp_opt["ipopt.sb"] = "yes";
+    Function solver = nlpsol("nlpsol", "ipopt", nlp_arg, nlp_opt);
     
     // Solve it
     DMDict sol_arg = {{"x0", arg0}, {"lbx", lbarg}, {"ubx", ubarg}, {"p", param_vals}};
