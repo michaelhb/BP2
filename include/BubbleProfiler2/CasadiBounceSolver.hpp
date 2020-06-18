@@ -165,7 +165,7 @@ private:
     }
 
     //! Find ansatz parameters (r0, sigma) such that V[phi] = V0_target
-    Ansatz get_ansatz(casadi::Function fV, 
+    Ansatz get_ansatz(casadi::Function fV, casadi::Function fT,
             CompactGrid grid,
             std::map<std::string, double> v_pars, 
             casadi::DM true_vac, casadi::DM false_vac) const;

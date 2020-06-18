@@ -415,7 +415,9 @@ NLP CasadiBounceSolver::get_nlp(const casadi::Function& potential) const {
     return nlp;
 }
 
-Ansatz CasadiBounceSolver::get_ansatz(casadi::Function fV, 
+Ansatz CasadiBounceSolver::get_ansatz(
+    casadi::Function fV, 
+    casadi::Function fT,
     CompactGrid grid,
     std::map<std::string, double> v_pars, 
     casadi::DM true_vac, casadi::DM false_vac) const {
@@ -565,7 +567,7 @@ BouncePath CasadiBounceSolver::solve(const std::vector<double>& true_vacuum, con
 
     // Find the ansatz solution
     auto t_ansatz_start = high_resolution_clock::now();
-    Ansatz ansatz = get_ansatz(nlp.V_a, grid, v_pars, true_vacuum, false_vacuum);
+    Ansatz ansatz = get_ansatz(nlp.V_a, nlp.T_a, grid, v_pars, true_vacuum, false_vacuum);
     auto t_ansatz_end = high_resolution_clock::now();
     auto ansatz_duration = duration_cast<microseconds>(t_ansatz_end - t_ansatz_start).count() * 1e-6;
     if (!quiet) std::cout << "Finding ansatz took " << ansatz_duration << "s" << std::endl;
