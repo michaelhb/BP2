@@ -9,7 +9,7 @@ int main() {
     int order = 7;
 
     // Thinness parameter (smaller values -> thinner walled)
-    double delta = 0.05;
+    double delta = 0.4;
 
     PolynomialPotential pp = get_potential(order);
     std::vector<double> true_vac = find_true_vac(pp, delta);
