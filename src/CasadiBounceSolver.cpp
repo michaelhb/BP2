@@ -142,7 +142,7 @@ Static_bounds CasadiBounceSolver::get_static_bounds(std::vector<double> false_va
     bounds.lbU = lbU;
     bounds.ubU = ubU;
     bounds.lbPhi = lbPhi;
-    bounds.ubPhi = ubPhi;
+    bounds.ubPhi = ubPhi;  
     bounds.lbg = lbg;
     bounds.ubg = ubg;
 
@@ -183,21 +183,35 @@ NLP CasadiBounceSolver::get_nlp(const casadi::Function& potential) const {
     for (auto & v_param: v_params) {
         pars.push_back(v_param);
     }
+    
+    /**** Symbolic ansatz parameters ****/
+    SX r0 = SX::sym("r0");
+    SX sigma = SX::sym("sigma");
+    SX true_vac = SX::sym("true_vacuum", n_phi);
+    SX false_vac = SX::sym("false_vacuum", n_phi);
+    SX zero_field = SX::sym("zero", n_phi);
 
     /**** Initialise control variables ****/        
-    SXVector U;
+    SXVector U, U_ansatz;
 
     // Derivative at origin fixed to zero
     SX U_0_0 = SX::sym("U_0_0", n_phi);
     U.push_back(U_0_0);
+    U_ansatz.push_back(ansatz_dot(0, 0, true_vac, false_vac, r0, sigma, gamma_par));
 
-    for (int k = 1; k <= N; ++k) {
+    for (int k = 1; k < N; ++k) {
         SX Uk = SX::sym(varname("U", {k}), n_phi);
         U.push_back(Uk);
+        U_ansatz.push_back(ansatz_dot(k, 0, true_vac, false_vac, r0, sigma, gamma_par));
     }
 
+    // Endpoints (avoid Tr(1) singularity)
+    SX UN = SX::sym(varname("U", {N}), n_phi);
+    U.push_back(UN);
+    U_ansatz.push_back(zero_field); // Does this make any sense?!
+
     /**** Initialise state variables ****/
-    SXVector Phi;
+    SXVector Phi, Phi_ansatz;
     std::vector<SXVector> element_states; // States within an element
     SXVector element_plot; // Concatenated states within an element
     SXVector endpoints; // Endpoint states
@@ -207,12 +221,14 @@ NLP CasadiBounceSolver::get_nlp(const casadi::Function& potential) const {
         SX phi_k_0 = SX::sym(varname("phi", {k, 0}), n_phi);
         endpoints.push_back(phi_k_0);
         Phi.push_back(phi_k_0);
+        Phi_ansatz.push_back(ansatz(k, 0, true_vac, false_vac, r0, sigma, gamma_par));
     }
 
     // Final state, fixed to the false vacuum
     SX phi_N_0 = SX::sym("phi_N_0", n_phi);
     endpoints.push_back(phi_N_0);
     Phi.push_back(phi_N_0);
+    Phi_ansatz.push_back(false_vac);
 
     // Build finite elements (including left endpoints)
     for (int k = 0; k < N; ++k) {
@@ -222,6 +238,7 @@ NLP CasadiBounceSolver::get_nlp(const casadi::Function& potential) const {
             SX phi_k_j = SX::sym(varname("phi", {k, j}), n_phi);
             e_states.push_back(phi_k_j);
             Phi.push_back(phi_k_j);
+            Phi_ansatz.push_back(ansatz(k, j, true_vac, false_vac, r0, sigma, gamma_par));
         }
         element_plot.push_back(SX::horzcat(e_states));
         element_states.push_back(e_states);
@@ -348,6 +365,21 @@ NLP CasadiBounceSolver::get_nlp(const casadi::Function& potential) const {
     Function V_a = Function("fV", V_a_arg, {V}, V_a_argnames, {"V"});
     Function T_a = Function("fT", T_a_arg, {T}, T_a_argnames, {"T"});
 
+    // We want these as functions of {r0,sigma,v_params,grid_pars}
+    SXDict V_ansatz_args, T_ansatz_args;
+    V_ansatz_args["Phi"] = vertcat(Phi_ansatz);
+    V_ansatz_args["par"] = vertcat(grid_pars);
+    T_ansatz_args["U"] = vertcat(U_ansatz);
+    T_ansatz_args["par"] = vertcat(grid_pars);
+    add_param_args(V_ansatz_args);
+    add_param_args(T_ansatz_args);
+
+    // Function V_ansatz = Function("V_ansatz", 
+    //     {r0, sigma, true_vac, false_vac}, {V_a(V_ansatz_args).at("V")});
+
+    // Function T_ansatz = Function("T_ansatz", 
+    //     {r0, sigma, true_vac, false_vac}, {T_a(T_ansatz_args).at("T")});
+
     /**** Build constraints ****/ 
     SXVector g = {}; // All constraints
 
@@ -384,14 +416,12 @@ NLP CasadiBounceSolver::get_nlp(const casadi::Function& potential) const {
     Function T_ret = Function("T_ret", {W, vertcat(grid_pars), vertcat(v_params)}, {T}, {"W", "Par", "v_params"}, {"T"});
     Function V_ret = Function("V_ret", {W, vertcat(grid_pars), vertcat(v_params)}, {V}, {"W", "Par", "v_params"}, {"V"});
 
+    /**** Create the main NLP ****/
     SXDict nlp_arg = {{"f", T}, {"x", W}, {"g", G}, {"p", vertcat(pars)}};
     Dict nlp_opt = Dict();
     nlp_opt["expand"] = false;
     nlp_opt["ipopt.tol"] = 1e-3;
     nlp_opt["ipopt.constr_viol_tol"] = 1e-3;
-    // nlp_opt["ipopt.print_level"] = 6;
-    // nlp_opt["ipopt.nlp_scaling_method"] = "gradient-based";
-    // nlp_opt["ipopt.nlp_scaling_max_gradient"] = 10.;
 
     if (quiet) {
         nlp_opt["ipopt.print_level"] = 0;
@@ -399,12 +429,28 @@ NLP CasadiBounceSolver::get_nlp(const casadi::Function& potential) const {
         nlp_opt["ipopt.sb"] = "yes";
     }
 
-    Function solver = nlpsol("nlpsol", "ipopt", nlp_arg, nlp_opt);
+    Function solver = nlpsol("full_nlp", "ipopt", nlp_arg, nlp_opt);
+
+    /**** Create the ansatz NLP ****/
+    SXVector ansatz_nlp_pars(pars);
+    ansatz_nlp_pars.push_back(true_vac);
+    ansatz_nlp_pars.push_back(false_vac);
+    ansatz_nlp_pars.push_back(zero_field); // Hacky :(
+
+    SXDict ansatz_nlp_arg = {
+        {"f", T_a(T_ansatz_args).at("T")}, 
+        {"x", SX::vertcat({r0, sigma})},
+        {"g", V_a(V_ansatz_args).at("V") - V0_par},
+        {"p", vertcat(ansatz_nlp_pars)}};
+
+    Function ansatz_solver = nlpsol("ansatz_nlp", "ipopt", ansatz_nlp_arg, nlp_opt);
+
     auto t_setup_end = high_resolution_clock::now();
     auto setup_duration = duration_cast<microseconds>(t_setup_end - t_setup_start).count() * 1e-6;
-    if (!quiet) std::cout << "CasadiMaupertuisSolver - setup took " << setup_duration << " sec" << std::endl;
+    if (!quiet) std::cout << "CasadiBounceSolver - setup took " << setup_duration << " sec" << std::endl;
     
     NLP nlp;
+    nlp.ansatz_nlp = ansatz_solver;
     nlp.nlp = solver;
     nlp.T_a = T_a;
     nlp.T_ret = T_ret;
@@ -415,7 +461,7 @@ NLP CasadiBounceSolver::get_nlp(const casadi::Function& potential) const {
     return nlp;
 }
 
-Ansatz CasadiBounceSolver::get_ansatz(
+Ansatz CasadiBounceSolver::get_initial_ansatz(
     casadi::Function fV, 
     casadi::Function fT,
     CompactGrid grid,
@@ -562,24 +608,23 @@ BouncePath CasadiBounceSolver::solve(const std::vector<double>& true_vacuum, con
     using namespace std::chrono;
 
     // Get concatenated grid parameters (h_k, gamma, gamma_dot)
-    // std::vector<double> grid_pars = get_grid_pars();
     CompactGrid grid = get_grid(default_grid_scale);
 
-    // Find the ansatz solution
+    /**** Find the initial ansatz ****/
     auto t_ansatz_start = high_resolution_clock::now();
-    Ansatz ansatz = get_ansatz(nlp.V_a, nlp.T_a, grid, v_pars, true_vacuum, false_vacuum);
-    auto t_ansatz_end = high_resolution_clock::now();
-    auto ansatz_duration = duration_cast<microseconds>(t_ansatz_end - t_ansatz_start).count() * 1e-6;
-    if (!quiet) std::cout << "Finding ansatz took " << ansatz_duration << "s" << std::endl;
-    
+    Ansatz initial_ansatz = get_initial_ansatz(nlp.V_a, nlp.T_a, grid, v_pars, true_vacuum, false_vacuum);
+
+    if (!quiet) std::cout << "Initial ansatz r0 = " << initial_ansatz.r0 
+        << ", sigma = " << initial_ansatz.sigma << std::endl;
+
     // Evaluate T and V on the ansatz
     DMDict argT(v_pars.begin(), v_pars.end());
-    argT["U"] = ansatz.U0;
+    argT["U"] = initial_ansatz.U0;
     argT["par"] = grid.concatenate();
     double T0 = nlp.T_a(argT).at("T").get_elements()[0];
 
     DMDict argV(v_pars.begin(), v_pars.end());
-    argV["Phi"] = ansatz.Phi0;
+    argV["Phi"] = initial_ansatz.Phi0;
     argV["par"] = grid.concatenate(); 
     double V0 = nlp.V_a(argV).at("V").get_elements()[0];
 
@@ -588,18 +633,51 @@ BouncePath CasadiBounceSolver::solve(const std::vector<double>& true_vacuum, con
 
     // Create an adjusted grid to increase the number of points 
     // near the expected bubble wall location
-    double new_scale = find_grid_scale(ansatz.r0);
+    double new_scale = find_grid_scale(initial_ansatz.r0);
 
     grid = get_grid(new_scale);
     if (!quiet) std::cout << "Adjusted grid scale to " << new_scale << std::endl;
 
-    // if (new_scale > default_grid_scale) {
-    //     grid = get_grid(new_scale);
-    //     std::cout << "Adjusted grid scale to " << new_scale << std::endl;
-    // }
-
     // Rescale the ansatz to the new grid
-    Ansatz scaled_ansatz = rescale_ansatz(ansatz, grid);
+    Ansatz scaled_ansatz = rescale_ansatz(initial_ansatz, grid);
+
+    /**** Refine the ansatz ****/
+
+    // Vector of (canonically ordered) model parameter values
+    std::vector<double> v_param_vals;
+    for (auto & v_param_sx : v_params) {
+        v_param_vals.push_back(v_pars[v_param_sx.name()]);
+    }
+
+    // Concat the grid params, V0 param value, and model params
+    std::vector<double> pars(grid.concatenate());
+    pars.push_back(V0);
+    pars.insert(pars.end(), v_param_vals.begin(), v_param_vals.end());
+
+    // pars will be used for the full NLP, but we need some extra 
+    // params for the ansatz
+    std::vector<double> ansatz_pars(pars);
+    ansatz_pars.insert(ansatz_pars.end(), true_vacuum.begin(), true_vacuum.end());
+    ansatz_pars.insert(ansatz_pars.end(), false_vacuum.begin(), false_vacuum.end());
+    for (int i = 0; i < n_phi; ++i) ansatz_pars.push_back(0); // Hacky :(
+
+    std::vector<double> x0_a = {scaled_ansatz.r0, scaled_ansatz.sigma};
+    std::vector<double> lbx_a = {0., 0.};
+    std::vector<double> ubx_a = {100., 100.};
+    std::vector<double> lbg_a = {0.};
+    std::vector<double> ubg_a = {0.};
+
+    DMDict ansatz_arg = {{"x0", x0_a}, {"lbx", lbx_a}, {"ubx", ubx_a}, 
+        {"lbg", lbg_a}, {"ubg", ubg_a}, {"p", ansatz_pars}};
+
+    DMDict res_a = nlp.ansatz_nlp(ansatz_arg);
+    double r0_a = res_a.at("x").get_elements()[0];
+    double sigma_a = res_a.at("x").get_elements()[1];
+    std::cout << res_a << std::endl;
+
+    auto t_ansatz_end = high_resolution_clock::now();
+    auto ansatz_duration = duration_cast<microseconds>(t_ansatz_end - t_ansatz_start).count() * 1e-6;
+    if (!quiet) std::cout << "Finding ansatz took " << ansatz_duration << "s" << std::endl;
 
     /**** Concatenate NLP initial state ****/
     std::vector<double> w0 = {}; // Initial values for decision variables
@@ -617,17 +695,6 @@ BouncePath CasadiBounceSolver::solve(const std::vector<double>& true_vacuum, con
     ubw.insert(ubw.end(), bounds.ubU.begin(), bounds.ubU.end());
 
     /**** Initialise and solve the NLP ****/
-
-    // Vector of (canonically ordered) model parameter values
-    std::vector<double> v_param_vals;
-    for (auto & v_param_sx : v_params) {
-        v_param_vals.push_back(v_pars[v_param_sx.name()]);
-    }
-
-    // Concat the grid params, V0 param value, and model params
-    std::vector<double> pars(grid.concatenate());
-    pars.push_back(V0);
-    pars.insert(pars.end(), v_param_vals.begin(), v_param_vals.end());
 
     // Run the optimiser. This is the other bottleneck, so we time it too.
     DMDict arg = {{"x0", w0}, {"lbx", lbw}, {"ubx", ubw}, {"lbg", bounds.lbg}, {"ubg", bounds.ubg}, {"p", pars}};

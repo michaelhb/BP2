@@ -17,7 +17,8 @@ std::vector<double> find_minimum(casadi::Function potential,
         argV[params[i].name()] = params[i];
     }
 
-    SX f = potential(argV).at("V");        
+    SX f = potential(argV).at("V");      
+
     SXDict nlp_arg = {{"f", f}, {"x", arg}, {"p", vertcat(params)}};
     Dict nlp_opt = Dict();
     nlp_opt["ipopt.print_level"] = 0;

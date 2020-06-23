@@ -47,7 +47,7 @@ PolynomialPotential get_potential(int order) {
 
     for (int i = 0; i < order; ++i) {
         std::ostringstream name;
-        name << "phi_" << order;
+        name << "phi_" << i;
         phi.push_back(SX::sym(name.str()));
     }
 

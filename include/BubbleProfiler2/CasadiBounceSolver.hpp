@@ -25,7 +25,8 @@ struct Ansatz {
 
 struct NLP {
     casadi::Function nlp;
-    
+    casadi::Function ansatz_nlp;
+
     // Separate T/V for ansatz / return is 
     // ugly and should be done better 
     casadi::Function T_a; // T function (for ansatz)
@@ -139,12 +140,15 @@ private:
     }
 
     //! Transformation from compact to semi infinite domain
-    double Tr(double tau, double grid_scale) const {
+    template <typename T>
+    T Tr(double tau, T grid_scale) const {
+        using namespace casadi;
         return grid_scale*log(2.0/(1.0 - tau));
     }
 
     //! Derivative of monotonic transformation
-    double Tr_dot(double tau, double grid_scale) const {
+    template <typename T>
+    T Tr_dot(double tau, T grid_scale) const {
         return grid_scale / (1.0 - tau);
     }
 
@@ -156,6 +160,18 @@ private:
             + exp(-rho)/(sigma*std::pow(cosh(r0/sigma),2)));
     }
 
+    //! Symbolic expansion of ansatz at Tr(t_kj)
+    casadi::SX ansatz(int k, int j, casadi::SX true_vac, casadi::SX false_vac, 
+        casadi::SX r0, casadi::SX sigma, casadi::SXVector gamma_par) const {
+
+        using namespace casadi;
+        SX rho = gamma_par[k](j);
+
+        return true_vac + 0.5*(false_vac - true_vac)*(1 
+            + tanh((rho - r0) / sigma)
+            + exp(-rho)/(sigma*pow(cosh(r0/sigma),2)));
+    }
+
     //! Derivative of ansatz in semi-infinite coordinates
     casadi::DM ansatz_dot(double rho, casadi::DM true_vac, casadi::DM false_vac,
         double r0, double sigma) const {
@@ -164,8 +180,20 @@ private:
                 exp(-rho)/(sigma*std::pow(cosh(r0/sigma), 2)));
     }
 
+    //! Symbolic expansion of ansatz derivative at Tr(t_kj)
+    casadi::SX ansatz_dot(int k, int j,  casadi::SX true_vac, casadi::SX false_vac, 
+        casadi::SX r0, casadi::SX sigma, casadi::SXVector gamma_par) const {
+    
+        using namespace casadi;
+        SX rho = gamma_par[k](j);
+
+        return ((false_vac - true_vac)/2.0)*(
+                1.0/(sigma*pow(cosh((rho-r0)/sigma), 2)) -
+                exp(-rho)/(sigma*pow(cosh(r0/sigma), 2)));
+    }
+
     //! Find ansatz parameters (r0, sigma) such that V[phi] = V0_target
-    Ansatz get_ansatz(casadi::Function fV, casadi::Function fT,
+    Ansatz get_initial_ansatz(casadi::Function fV, casadi::Function fT,
             CompactGrid grid,
             std::map<std::string, double> v_pars, 
             casadi::DM true_vac, casadi::DM false_vac) const;
@@ -173,7 +201,6 @@ private:
     //! Find the grid scale that places r_point_frac points before 
     // the estimated bubble wall
     double find_grid_scale(double r0) const {
-        // r_point_frac -> [-1, 1]
         double t_point_frac = 2.0*r_point_frac - 1;
         return r0/(log((2.0)/(1 - t_point_frac)));
     }
