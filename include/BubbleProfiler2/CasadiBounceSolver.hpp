@@ -27,6 +27,10 @@ struct NLP {
     casadi::Function nlp;
     casadi::Function ansatz_nlp;
 
+    // Temp??
+    casadi::Function V_ansatz;
+    casadi::Function T_ansatz;
+
     // Separate T/V for ansatz / return is 
     // ugly and should be done better 
     casadi::Function T_a; // T function (for ansatz)
@@ -150,7 +154,7 @@ private:
     template <typename T>
     T Tr_dot(double tau, T grid_scale) const {
         return grid_scale / (1.0 - tau);
-    }
+    } 
 
     //! Ansatz in semi-infinite coordinates
     casadi::DM ansatz(double rho, casadi::DM true_vac, casadi::DM false_vac, 
@@ -183,7 +187,7 @@ private:
     //! Symbolic expansion of ansatz derivative at Tr(t_kj)
     casadi::SX ansatz_dot(int k, int j,  casadi::SX true_vac, casadi::SX false_vac, 
         casadi::SX r0, casadi::SX sigma, casadi::SXVector gamma_par) const {
-    
+
         using namespace casadi;
         SX rho = gamma_par[k](j);
 

@@ -210,6 +210,8 @@ NLP CasadiBounceSolver::get_nlp(const casadi::Function& potential) const {
     U.push_back(UN);
     U_ansatz.push_back(zero_field); // Does this make any sense?!
 
+    std::cout << U_ansatz << std::endl;
+
     /**** Initialise state variables ****/
     SXVector Phi, Phi_ansatz;
     std::vector<SXVector> element_states; // States within an element
@@ -374,11 +376,17 @@ NLP CasadiBounceSolver::get_nlp(const casadi::Function& potential) const {
     add_param_args(V_ansatz_args);
     add_param_args(T_ansatz_args);
 
-    // Function V_ansatz = Function("V_ansatz", 
-    //     {r0, sigma, true_vac, false_vac}, {V_a(V_ansatz_args).at("V")});
+    // MAYBE TEMP?
+    SXVector ansatz_args = {r0, sigma, true_vac, false_vac, zero_field, vertcat(grid_pars)};
+    ansatz_args.insert(ansatz_args.end(), v_params.begin(), v_params.end());
+    std::vector<std::string> ansatz_arg_names = {"r0", "sigma", "true_vac", "false_vac", "zero", "grid_pars"};
+    for (int i = 0; i < v_params.size(); ++i) ansatz_arg_names.push_back(v_params[i].name());
 
-    // Function T_ansatz = Function("T_ansatz", 
-    //     {r0, sigma, true_vac, false_vac}, {T_a(T_ansatz_args).at("T")});
+    Function V_ansatz = Function("V_ansatz", ansatz_args, {V_a(V_ansatz_args).at("V")},
+        ansatz_arg_names, {"V"});
+
+    Function T_ansatz = Function("T_ansatz", ansatz_args, {T_a(T_ansatz_args).at("T")},
+        ansatz_arg_names, {"T"});
 
     /**** Build constraints ****/ 
     SXVector g = {}; // All constraints
@@ -452,6 +460,8 @@ NLP CasadiBounceSolver::get_nlp(const casadi::Function& potential) const {
     NLP nlp;
     nlp.ansatz_nlp = ansatz_solver;
     nlp.nlp = solver;
+    nlp.T_ansatz = T_ansatz;
+    nlp.V_ansatz = V_ansatz;
     nlp.T_a = T_a;
     nlp.T_ret = T_ret;
     nlp.V_a = V_a;
@@ -631,6 +641,21 @@ BouncePath CasadiBounceSolver::solve(const std::vector<double>& true_vacuum, con
     if (!quiet) std::cout << "V(ansatz) = " << V0 << std::endl;
     if (!quiet) std::cout << "T(ansatz) = " << T0 << std::endl;
 
+    // TEMP FOR TESTING
+
+    DMDict argVtest;
+    argVtest["r0"] = initial_ansatz.r0;
+    argVtest["sigma"] = initial_ansatz.sigma;
+    argVtest["true_vac"] = true_vacuum;
+    argVtest["false_vac"] = false_vacuum;
+    argVtest["grid_pars"] = grid.concatenate();
+    argVtest["zero"] = std::vector<double>(n_phi, 0);
+
+    double Vtest = nlp.V_ansatz(argVtest).at("V").get_elements()[0];
+    double Ttest = nlp.T_ansatz(argVtest).at("T").get_elements()[0];
+    std::cout << "VTEST: " << Vtest << std::endl;
+    std::cout << "TTEST: " << Ttest << std::endl;
+
     // Create an adjusted grid to increase the number of points 
     // near the expected bubble wall location
     double new_scale = find_grid_scale(initial_ansatz.r0);
@@ -662,7 +687,7 @@ BouncePath CasadiBounceSolver::solve(const std::vector<double>& true_vacuum, con
     for (int i = 0; i < n_phi; ++i) ansatz_pars.push_back(0); // Hacky :(
 
     std::vector<double> x0_a = {scaled_ansatz.r0, scaled_ansatz.sigma};
-    std::vector<double> lbx_a = {0., 0.};
+    std::vector<double> lbx_a = {1e-5, 1e-5};
     std::vector<double> ubx_a = {100., 100.};
     std::vector<double> lbg_a = {0.};
     std::vector<double> ubg_a = {0.};
@@ -673,7 +698,9 @@ BouncePath CasadiBounceSolver::solve(const std::vector<double>& true_vacuum, con
     DMDict res_a = nlp.ansatz_nlp(ansatz_arg);
     double r0_a = res_a.at("x").get_elements()[0];
     double sigma_a = res_a.at("x").get_elements()[1];
-    std::cout << res_a << std::endl;
+
+    if (!quiet) std::cout << "Final ansatz r0 = " << r0_a 
+        << ", sigma = " << sigma_a << std::endl;
 
     auto t_ansatz_end = high_resolution_clock::now();
     auto ansatz_duration = duration_cast<microseconds>(t_ansatz_end - t_ansatz_start).count() * 1e-6;
