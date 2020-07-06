@@ -31,6 +31,10 @@ struct NLP {
     casadi::Function V_ansatz;
     casadi::Function T_ansatz;
 
+    // Definitely temp!
+    casadi::Function fPhi_ansatz;
+    casadi::Function fU_ansatz;
+
     // Separate T/V for ansatz / return is 
     // ugly and should be done better 
     casadi::Function T_a; // T function (for ansatz)
@@ -173,9 +177,9 @@ private:
 
         return true_vac + 0.5*(false_vac - true_vac)*(1 
             + tanh((rho - r0) / sigma)
-            + exp(-rho)/(sigma*pow(cosh(r0/sigma),2)));
+            + (exp(-rho))/((sigma*pow(cosh(r0/sigma),2))));
     }
-
+        
     //! Derivative of ansatz in semi-infinite coordinates
     casadi::DM ansatz_dot(double rho, casadi::DM true_vac, casadi::DM false_vac,
         double r0, double sigma) const {
