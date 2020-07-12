@@ -366,7 +366,7 @@ NLP CasadiBounceSolver::get_nlp(const casadi::Function& potential) const {
     T_ansatz_args["par"] = vertcat(grid_pars);
     add_param_args(V_ansatz_args);
     add_param_args(T_ansatz_args);
-
+    
     // MAYBE TEMP?
     SXVector ansatz_args = {r0, sigma, true_vac, false_vac, zero_field, vertcat(grid_pars)};
     ansatz_args.insert(ansatz_args.end(), v_params.begin(), v_params.end());
@@ -379,6 +379,10 @@ NLP CasadiBounceSolver::get_nlp(const casadi::Function& potential) const {
 
     Function T_ansatz = Function("T_ansatz", ansatz_args, {T_a(T_ansatz_args).at("T")},
         ansatz_arg_names, {"T"});
+
+    Function gradT_ansatz = Function("gradT_ansatz", ansatz_args, {
+        gradient(T_a(T_ansatz_args).at("T"), SX::vertcat({r0, sigma}))
+    }, ansatz_arg_names, {"gradT"});
 
     // Out of desparation...
     Function fPhi_ansatz = Function("fPhi_ansatz", ansatz_args, {vertcat(Phi_ansatz)}, ansatz_arg_names, {"Phi"});
@@ -432,8 +436,13 @@ NLP CasadiBounceSolver::get_nlp(const casadi::Function& potential) const {
     SXDict nlp_arg = {{"f", T}, {"x", W}, {"g", G}, {"p", vertcat(pars)}};
     Dict nlp_opt = Dict();
     nlp_opt["expand"] = false;
-    nlp_opt["ipopt.tol"] = 1e-3;
-    nlp_opt["ipopt.constr_viol_tol"] = 1e-3;
+    // nlp_opt["ipopt.tol"] = 1e-3;
+    // nlp_opt["ipopt.constr_viol_tol"] = 1e-3;
+    // nlp_opt["ipopt.derivative_test"] = "first-order";
+    // nlp_opt["ipopt.point_perturbation_radius"] = 0;
+    // nlp_opt["ipopt.derivative_test_print_all"] = "yes";
+    // nlp_opt["ipopt.derivative_test_perturbation"] = 1e-3;
+    
 
     if (quiet) {
         nlp_opt["ipopt.print_level"] = 0;
@@ -449,13 +458,10 @@ NLP CasadiBounceSolver::get_nlp(const casadi::Function& potential) const {
     ansatz_nlp_pars.push_back(false_vac);
     ansatz_nlp_pars.push_back(zero_field); // Hacky :(
 
-    std::cout << "ansatz_nlp_pars" << std::endl;
-    std::cout << vertcat(ansatz_nlp_pars) << std::endl;
-
     SXDict ansatz_nlp_arg = {
         {"f", T_a(T_ansatz_args).at("T")}, 
         {"x", SX::vertcat({r0, sigma})},
-        {"g", V_a(V_ansatz_args).at("V") - V0_par},
+        {"g", V0_par - V_a(V_ansatz_args).at("V")},
         {"p", vertcat(ansatz_nlp_pars)}};
 
     Function ansatz_solver = nlpsol("ansatz_nlp", "ipopt", ansatz_nlp_arg, nlp_opt);
@@ -468,9 +474,10 @@ NLP CasadiBounceSolver::get_nlp(const casadi::Function& potential) const {
     nlp.ansatz_nlp = ansatz_solver;
     nlp.nlp = solver;
     nlp.T_ansatz = T_ansatz;
+    nlp.gradT_ansatz = gradT_ansatz;
     nlp.V_ansatz = V_ansatz;
     nlp.fPhi_ansatz = fPhi_ansatz;
-    nlp.fU_ansatz = fU_ansatz;
+    nlp.fU_ansatz = fU_ansatz;  
     nlp.T_a = T_a;
     nlp.T_ret = T_ret;
     nlp.V_a = V_a;
@@ -626,6 +633,9 @@ BouncePath CasadiBounceSolver::solve(const std::vector<double>& true_vacuum, con
     using namespace casadi;
     using namespace std::chrono;
 
+    std::cout << "TRUE_VACUUM: " << true_vacuum << std::endl;
+    std::cout << "FALSE_VACUUM: " << false_vacuum << std::endl;
+
     // Get concatenated grid parameters (h_k, gamma, gamma_dot)
     CompactGrid grid = get_grid(default_grid_scale);
 
@@ -659,22 +669,12 @@ BouncePath CasadiBounceSolver::solve(const std::vector<double>& true_vacuum, con
 
     double Ttest = nlp.T_ansatz(argVtest).at("T").get_elements()[0];
     double Vtest = nlp.V_ansatz(argVtest).at("V").get_elements()[0];
-    // std::vector<double> PhiTest = nlp.fPhi_ansatz(argVtest).at("Phi").get_elements();
-    // std::vector<double> UTest = nlp.fU_ansatz(argVtest).at("U").get_elements();
+
+    std::vector<double> gradTTest = nlp.gradT_ansatz(argVtest).at("gradT").get_elements();
+
     std::cout << "V(initial ansatz) = " << Vtest << std::endl;
     std::cout << "T(initial ansatz) = " << Ttest << std::endl;
-
-    // // Try evaluation V_a on PhiTest?
-    // DMDict argV2(argV);
-    // argV2["Phi"] = PhiTest;
-    // double V02 = nlp.V_a(argV2).at("V").get_elements()[0];
-    // std::cout << "V_a evaluated on PhiTest: " << V02 << std::endl;
-
-    // // What about T_a?
-    // DMDict argT2(argT);
-    // argT2["U"] = UTest;
-    // double T02 = nlp.T_a(argT2).at("T").get_elements()[0];
-    // std::cout << "T_a evaluated on UTest: " << T02 << std::endl;
+    std::cout << "gradT(initial_ansatz) = " << gradTTest << std::endl;
 
     // END TEMP
 
@@ -687,6 +687,18 @@ BouncePath CasadiBounceSolver::solve(const std::vector<double>& true_vacuum, con
 
     // Rescale the ansatz to the new grid
     Ansatz scaled_ansatz = rescale_ansatz(initial_ansatz, grid);
+
+    // TEMP FOR TESTING
+    argVtest["grid_pars"] = grid.concatenate();
+    double Ttest2 = nlp.T_ansatz(argVtest).at("T").get_elements()[0];
+    double Vtest2 = nlp.V_ansatz(argVtest).at("V").get_elements()[0];
+    std::vector<double> gradTTest2 = nlp.gradT_ansatz(argVtest).at("gradT").get_elements();
+    
+    std::cout << "V(initial ansatz) = " << Vtest2 << std::endl;
+    std::cout << "T(initial ansatz) = " << Ttest2 << std::endl;
+    std::cout << "gradT(initial_ansatz) = " << gradTTest2 << std::endl;
+
+    // END TEMP
 
     /**** Refine the ansatz ****/
 
@@ -733,11 +745,11 @@ BouncePath CasadiBounceSolver::solve(const std::vector<double>& true_vacuum, con
     argVtest["grid_pars"] = grid.concatenate();
     argVtest["zero"] = std::vector<double>(n_phi, 0);
 
-    double Ttest2 = nlp.T_ansatz(argVtest).at("T").get_elements()[0];
-    double Vtest2 = nlp.V_ansatz(argVtest).at("V").get_elements()[0];
+    double Ttest3 = nlp.T_ansatz(argVtest).at("T").get_elements()[0];
+    double Vtest3 = nlp.V_ansatz(argVtest).at("V").get_elements()[0];
 
-    std::cout << "T(final ansatz) = " << Ttest2 << std::endl;
-    std::cout << "V(final ansatz) = " << Vtest2 << std::endl;
+    std::cout << "T(final ansatz) = " << Ttest3 << std::endl;
+    std::cout << "V(final ansatz) = " << Vtest3 << std::endl;
 
     // END TEMP
 

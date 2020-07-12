@@ -30,6 +30,7 @@ struct NLP {
     // Temp??
     casadi::Function V_ansatz;
     casadi::Function T_ansatz;
+    casadi::Function gradT_ansatz;
 
     // Definitely temp!
     casadi::Function fPhi_ansatz;
