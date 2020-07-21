@@ -6,16 +6,16 @@ int main() {
     using namespace casadi;
 
     // Degree of the polynomial potential
-    int order = 2;
+    int order = 15;
 
     // Thinness parameter (smaller values -> thinner walled)
-    double delta = 0.05;
+    double delta = 0.4;
 
     PolynomialPotential pp = get_potential(order);
     std::vector<double> true_vac = find_true_vac(pp, delta);
     std::vector<double> false_vac(order, 0.);
 
-    CasadiBounceSolver solver = CasadiBounceSolver(pp.fV, order, {pp.delta}, 3, 2000, false);
+    CasadiBounceSolver solver = CasadiBounceSolver(pp.fV, order, {pp.delta}, 3, 300, false);
 
     std::map<std::string, double> v_pars;
     v_pars["delta"] = delta;

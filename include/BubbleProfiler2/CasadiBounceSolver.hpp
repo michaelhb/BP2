@@ -12,7 +12,7 @@
 namespace BubbleProfiler2 {
 
 struct Ansatz {
-    // TODO: this should probably be a class...
+    // TODO: omg make this a class already
 
     double V0; // (actual) value of V constraint
     double r0; // Estimated wall location (on [0,inf])
@@ -27,14 +27,14 @@ struct NLP {
     casadi::Function nlp;
     casadi::Function ansatz_nlp;
 
-    // Temp??
-    casadi::Function V_ansatz;
-    casadi::Function T_ansatz;
-    casadi::Function gradT_ansatz;
+    // // Temp??
+    // casadi::Function V_ansatz;
+    // casadi::Function T_ansatz;
+    // casadi::Function gradT_ansatz;
 
-    // Definitely temp!
-    casadi::Function fPhi_ansatz;
-    casadi::Function fU_ansatz;
+    // // Definitely temp!
+    // casadi::Function fPhi_ansatz;
+    // casadi::Function fU_ansatz;
 
     // Separate T/V for ansatz / return is 
     // ugly and should be done better 
@@ -129,7 +129,7 @@ private:
     std::vector<double> t_k; // Element start times
     std::vector<double> h_k; // Element widths
     double default_grid_scale = 15.0; // Multiplying factor for gamma (TODO make dynamic)
-    double r_point_frac = 0.5; // Fraction of points to place before the bubble wall when solving
+    double r_point_frac = 0.7; // Fraction of points to place before the bubble wall when solving
     NLP nlp; // Algebraic representation of optimisation problem
     std::vector<std::vector<double> > C; // Coefficients of the collocation equation
     std::vector<double> D; // Coefficients of the continuity equation
@@ -203,7 +203,7 @@ private:
 
     //! Find ansatz parameters (r0, sigma) such that V[phi] = V0_target
     Ansatz get_initial_ansatz(casadi::Function fV, casadi::Function fT,
-            CompactGrid grid,
+            CompactGrid& grid,
             std::map<std::string, double> v_pars, 
             casadi::DM true_vac, casadi::DM false_vac) const;
 
@@ -215,7 +215,12 @@ private:
     }
 
     //! Rescale the ansatz solution, after adjusting the grid scale
-    Ansatz rescale_ansatz(Ansatz ansatz, CompactGrid grid) const;
+    Ansatz rescale_ansatz(Ansatz ansatz, CompactGrid& grid) const;
+
+    //! Given r0, sigma, and a CompactGrid, get the corresponding Ansatz
+    // TODO: Make Ansatz a class already, this is terrible
+    Ansatz get_ansatz(double r0, double sigma, double V0, std::vector<double> true_vac, 
+        std::vector<double> false_vac, CompactGrid grid) const;
 
     //! Utility method: generate subscripted variable names
     std::string varname(std::string prefix, std::vector<int> indices) const {
