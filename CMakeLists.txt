@@ -8,6 +8,8 @@ project(BubbleProfiler2
 
 set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} ${PROJECT_SOURCE_DIR}/cmake)
 
+set(CMAKE_CXX_STANDARD 17)
+
 find_package(CASADI REQUIRED)
 find_package(gnuplot-iostream REQUIRED)
 

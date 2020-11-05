@@ -4,6 +4,7 @@
 #include <cassert>
 #include <vector>
 #include <string>
+#include <map>
 
 namespace BubbleProfiler2 {
 
@@ -19,6 +20,7 @@ public:
         radii = radii_;
         profiles = profiles_;
         action = action_;
+        metadata = std::map<std::string,double>();
     };
 
     // Just expose the data for now, add more appropriate 
@@ -32,10 +34,19 @@ public:
 
     void plot_profiles(double r_max = -1., std::string title = "") const;
 
+    const double get_metadata(std::string label) const {
+        return metadata.at(label);
+    }
+
+    void set_metadata(std::string label, double value) {
+        metadata[label] = value;
+    }
+
 private:
     double action;
     std::vector<double> radii;
     std::vector<std::vector<double>> profiles;
+    std::map<std::string, double> metadata;
 };
 
 };

@@ -27,15 +27,6 @@ struct NLP {
     casadi::Function nlp;
     casadi::Function ansatz_nlp;
 
-    // // Temp??
-    // casadi::Function V_ansatz;
-    // casadi::Function T_ansatz;
-    // casadi::Function gradT_ansatz;
-
-    // // Definitely temp!
-    // casadi::Function fPhi_ansatz;
-    // casadi::Function fU_ansatz;
-
     // Separate T/V for ansatz / return is 
     // ugly and should be done better 
     casadi::Function T_a; // T function (for ansatz)

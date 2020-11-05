@@ -15,6 +15,7 @@ struct PolynomialPotential {
 };
 
 std::vector<std::vector<double>> coeffs = {
+    {0.5},
     {1.8, 0.2},
     {0.684373, 0.181928, 0.295089},
     {0.534808, 0.77023, 0.838912, 0.00517238},
@@ -43,7 +44,7 @@ PolynomialPotential get_potential(int order) {
     SXVector phi;
     SX delta = SX::sym("delta");
 
-    std::vector<double> order_coeffs = coeffs[order - 2];
+    std::vector<double> order_coeffs = coeffs[order - 1];
 
     for (int i = 0; i < order; ++i) {
         std::ostringstream name;
